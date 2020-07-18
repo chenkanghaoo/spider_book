@@ -1,0 +1,306 @@
+from selenium import webdriver
+import time
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.support.ui import Select
+from PIL import Image
+import requests
+from selenium.webdriver.common.desired_capabilities import DesiredCapabilities
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.common.by import By
+from selenium.webdriver.chrome.options import Options
+from lxml import etree
+from urllib.parse import quote
+import os
+'''
+实现自动登录，可根据用户需求进行定向选取书籍（即人--机交互），验证码识别本文暂时未实现，可采用tesserocr识别，或者opencv
+'''
+def login():
+    #输入用户名
+    input_user = browser.find_element_by_id("userName")     #查找输入框
+    input_user.send_keys("ckho")
+    time.sleep(2)
+
+    #输入密码
+    input_pwd = browser.find_element_by_id("passWord")
+    input_pwd.send_keys("chen13560034370")
+    time.sleep(2)
+
+    #选择
+    input_gid = Select(browser.find_element_by_id("gid"))   #实例化input_gid
+    input_gid.select_by_value("7320")                       #选择class=7320的选择
+    #截取该页面图片
+    browser.save_screenshot("screen.png")
+    # 定位验证码图片的位置，并截取该位置的图片
+    code_element = browser.find_element_by_id("vimg")
+    print(code_element.location) # {'x': 548, 'y': 523}
+    left = code_element.location['x']
+    top = code_element.location['y']
+    right = code_element.size['width'] + left
+    height = code_element.size['height'] + top
+
+    im = Image.open("screen.png")
+    img = im.crop((left, top, right, height))
+    img.save("screen4.png")
+    #验证码识别
+    try:
+        input_verify = wait.until(
+            EC.element_to_be_clickable((By.ID,"verifyCode"))
+        )#browser.find_element_by_id("verifyCode")
+        result = input("请输入验证码")
+        input_verify.send_keys(result)
+        #单击登录
+        enter = wait.until(
+            EC.element_to_be_clickable((By.ID,"submit"))
+        )#browser.find_element_by_id("submit").click()
+        enter.click()
+        print("登录成功")
+        browser.save_screenshot("screen6.png")
+        return browser.current_url
+    except BaseException:
+        print(" Enter Error")
+
+#查询书籍信息并且用户可选择页数
+def index_page(url):
+    book_name = input("请输入查找的书名")
+    input_bookname = browser.find_element_by_id("sw").send_keys(book_name)
+    enter = browser.find_element_by_xpath('//*[@id="f2"]/div[2]/input[1]').click()
+    print("当前页数为第一页")
+    all_book_information()
+    page = input("请输入想看页数：")
+    print("...正在爬取第"+str(page)+"页")
+    current_url = browser.current_url #输入书名后的页面的链接
+    try:
+        if int(page)>1:
+            browser.get(current_url)
+            print(current_url)
+            #查找输入框
+            input_page = wait.until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, "#jpage"))
+            )
+            #查找登录建
+            sumbit = wait.until(
+                EC.element_to_be_clickable((By.CSS_SELECTOR, '#pageinfo > input[type=button]:nth-child(13)'))
+            )
+            input_page.clear()
+            input_page.send_keys(str(page))
+            sumbit.click()
+        all_book_information()
+        return browser.current_url #换页后的链接
+    except TimeoutError:
+        index_page()
+
+def all_book_information():
+    #返回当前页面的书本信息
+    addres ='//table[@class="book1"]'
+    addres_list = browser.find_elements_by_xpath(addres)
+    book_list = []
+    for book in addres_list:
+        book_list.append(book.text)
+    for i in enumerate(book_list, start=1):
+        print(i)
+
+
+#获取每本书具体链接并且返回每本书具体信息
+def get_detail_book(url):
+    number = input("请输入你想要了解书的编号：")
+    browser.get(url)
+    addres = '//table[{}][@class="book1"]//a[@class="px14"]'.format(number)
+    book_url = browser.find_element_by_xpath(addres).get_attribute("href")
+    browser.get(book_url)
+    detail_book_information = browser.find_elements_by_xpath('//div[@class="tubox"]//dd')
+    for book in detail_book_information:
+        print(book.text)
+
+    return browser.current_url
+
+#进入图书馆文献传递页面
+def sent_book_emial(url):
+    bqy_url = browser.find_element_by_xpath('//*[@id="libinfo"]/div[1]/div/a[1]').get_attribute("href")
+    all_page_name(bqy_url)
+    answer = input("是否需要下载此书 是请输入是1 否2 看其他书按3 ,下载书名页4 下载前言页5 下载版权页6 下载目录页7 下载正文页8")
+    if int(answer)==1:
+        base_url = 'http://book.ucdrs.superlib.net/gofirstdrs.jsp?'
+        browser.get(url)
+        sent_href = browser.find_element_by_xpath('//*[@id="libinfo"]/div[2]//a').get_attribute("href") #页面上文献传递对应href值
+        #拆分href，拼接可进入图书参考咨询页面的url 通过进入文献传递，观察network中找到可进入图书参考咨询页面url，直接点击href是不能访问
+        list1 = sent_href.split("?", 1)
+        list2 = list1[1].split("'", 1)
+        tscx_url = base_url+list2[0]
+        print(tscx_url)
+        browser.save_screenshot("screen5.png")
+        book_download(tscx_url)
+    elif int(answer)==2:
+        print("\n")
+        print("本次查询结束，欢迎下次使用!")
+
+    elif int(answer) == 4:
+        browser.get(url)
+        bqy_url = browser.find_element_by_xpath('//*[@id="libinfo"]/div[1]/div/a[1]').get_attribute("href")
+        base_url = bqy_download(bqy_url)
+        smy_img(base_url)
+    elif int(answer)==5:
+        browser.get(url)
+        bqy_url = browser.find_element_by_xpath('//*[@id="libinfo"]/div[1]/div/a[1]').get_attribute("href")
+        base_url = bqy_download(bqy_url)
+        qyy_img(base_url)
+    elif int(answer)==6:
+        browser.get(url)
+        bqy_url = browser.find_element_by_xpath('//*[@id="libinfo"]/div[1]/div/a[1]').get_attribute("href")
+        base_url = bqy_download(bqy_url)
+        bqy_url(base_url)
+    elif int(answer)==7:
+        browser.get(url)
+        bqy_url = browser.find_element_by_xpath('//*[@id="libinfo"]/div[1]/div/a[1]').get_attribute("href")
+        base_url = bqy_download(bqy_url)
+        mly_img(base_url)
+    elif int(answer)==8:
+        browser.get(url)
+        bqy_url = browser.find_element_by_xpath('//*[@id="libinfo"]/div[1]/div/a[1]').get_attribute("href")
+        base_url = bqy_download(bqy_url)
+        zwy_img(base_url)
+    else:
+        url = "http://www.ucdrs.superlib.net/"
+        browser.get(url)
+        all_book_url_page = index_page(url)
+        detail_book_url = get_detail_book(all_book_url_page)
+        sent_book_emial(detail_book_url)
+
+
+def all_page_name(url):
+    browser.get(url)
+    all_page_name = browser.find_element_by_id("pagejump")
+    t1 = all_page_name.text.replace(" ", "") #删除空格
+    print("该书可看部分仅有:"+t1+"请按照此选择下载，否则可能导致下载错误")
+
+
+#图书下载
+def book_download(url):
+    browser.get(url)
+    all_page = browser.find_element_by_xpath('//*[@id="content"]/form/ul/li[3]/p[1]').text
+    print(all_page)
+    print("每本图书咨询每次不超过50页")
+    input1 = input("请输入想看的书初始页")
+    input2 = input("请输入想看的书的末页")
+    input_start = browser.find_element_by_id("frompage")
+    input_start.clear()
+    input_start.send_keys(input1)
+    input_led = browser.find_element_by_id("endpage")
+    input_led.clear()
+    input_led.send_keys(input2)
+    email = input("请输入你的邮箱账号")
+    input_email = browser.find_element_by_id("email").send_keys(email)
+    browser.save_screenshot('screen7.png')
+    verifycode1 = input("请输入验证码")
+    input_verifycode1 = browser.find_element_by_id("verifycode").send_keys(verifycode1)
+    browser.find_element_by_xpath('//*[@id="content"]/form/ul/li[6]/p/span/input').click()
+    time.sleep(5)
+    print(browser.switch_to.alert.text)
+    browser.switch_to.alert.accept()
+    browser.save_screenshot('screen9.png')
+
+#返回图片的url共同部分
+def bqy_download(url):
+    browser.get(url)
+    print(url)
+    time.sleep(4) #注意 需要留个页面加载时间，模仿人阅读时候网页加载速度  否则加载不出来想要的图片链接
+    browser.save_screenshot("screen8.png")
+    first_img_url = browser.find_element_by_xpath('//*[@id="reader"]/div/div[1]/input').get_attribute("src")
+    print(first_img_url)
+    base_url = first_img_url[0:-13]
+    print(base_url)
+    return base_url
+
+#下载书名页
+def smy_img(base_url):
+    i=1
+    print("仅下载1页")
+    while i<2:
+            img_url = base_url + 'bok00{}'.format(i) + '?zoom=0&f=0'
+            i += 1
+            response = requests.get(img_url)
+            print(img_url)
+            with open("D:/pycharm/实战案例/前言页/" + str(i-1) + '.png', "wb") as f:
+                f.write(response.content)
+                print("success download")
+            time.sleep(2)
+
+#下载版权页
+def bqy_img(base_url):
+    i=1
+    print("仅下载1页")
+    while i<2:
+            img_url = base_url + 'leg00{}'.format(i) + '?zoom=0&f=0'
+            i += 1
+            response = requests.get(img_url)
+            print(img_url)
+            with open("D:/pycharm/实战案例/版权页/" + str(i-1) + '.png', "wb") as f:
+                f.write(response.content)
+                print("success download")
+
+
+#下载前言页
+def qyy_img(base_url):
+    i=1
+    print("仅下载5页")
+    while i<6:
+            img_url = base_url + 'fow00{}'.format(i) + '?zoom=0&f=0'
+            i += 1
+            response = requests.get(img_url)
+            print(img_url)
+            with open("D:/pycharm/实战案例/前言页/" + str(i-1) + '.png', "wb") as f:
+                f.write(response.content)
+                print("success download")
+            # try:
+            #     response.headers["Accept-Encoding"]
+            # except:
+            #     break
+            time.sleep(2)
+
+#下载目录页
+def mly_img(base_url):
+    i=1
+    print("仅下载3页")
+    while i<4:
+            img_url = base_url + '!0000{}'.format(i) + '?zoom=0&f=0'
+            i += 1
+            response = requests.get(img_url)
+            print(img_url)
+            with open("D:/pycharm/实战案例/目录页/" + str(i-1) + '.png', "wb") as f:
+                f.write(response.content)
+                print("success download")
+            time.sleep(2)
+
+#下载正文页
+def zwy_img(base_url):
+    i=1
+    print("仅下载15页")
+    while i<12:
+            if i<16:
+                img_url = base_url + '00000{}'.format(i) + '?zoom=0&f=0'
+            else:
+                img_url = base_url + '0000{}'.format(i) + '?zoom=0&f=0'
+            i += 1
+            response = requests.get(img_url)
+            print(img_url)
+            with open("D:/pycharm/实战案例/正文页/" + str(i-1) + '.png', "wb") as f:
+                f.write(response.content)
+                print("success download")
+            time.sleep(2)
+
+
+if __name__ == '__main__':
+    url = "http://www.ucdrs.superlib.net/login/login.action"
+    chrome_options = Options()
+    # 设置chrome浏览器无界面模式
+    chrome_options.add_argument('--headless')
+    browser = webdriver.Chrome(chrome_options=chrome_options)
+    browser.get(url)
+    wait = WebDriverWait(browser, 8)
+    print("欢迎使用图书查询小程序")
+    login()  # 登录 需要手动验证码
+    all_book_url_page = index_page(url)  # 查看第几页及返回当前页的书本信息
+    detail_book_url = get_detail_book(all_book_url_page) #返回每本书的具体的链接
+    sent_book_emial(detail_book_url)
+
+
